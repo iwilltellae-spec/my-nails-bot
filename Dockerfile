@@ -1,37 +1,40 @@
-# Build stage
-FROM node:22-alpine AS builder
-
+# Stage 1: Build
+FROM node:20-slim AS builder
 WORKDIR /app
 
-# Install dependencies
-COPY package.json ./
-RUN npm install -g pnpm && pnpm install
+# Install pnpm
+RUN npm install -g pnpm
 
-# Copy source code
+# Copy configuration files
+COPY package.json pnpm-lock.yaml ./
+
+# Install ALL dependencies including devDeps for the build process
+RUN pnpm install --frozen-lockfile
+
+# Copy the rest of the source code
 COPY . .
 
-# Build application
-RUN pnpm build
+# Build the project (compiles TS to JS)
+RUN pnpm run build
 
-# Production stage
-FROM node:22-alpine
-
+# Stage 2: Production
+FROM node:20-slim
 WORKDIR /app
 
-# Install production dependencies only
-COPY package.json ./
-RUN npm install -g pnpm && pnpm install --prod
+# Install pnpm
+RUN npm install -g pnpm
 
-# Copy built application from builder
+# Copy only the necessary files from builder
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/dist/public ./client/dist
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/pnpm-lock.yaml ./pnpm-lock.yaml
 
-# Expose port
+# Install ONLY production dependencies
+# This removes devDependencies to make the image smaller and avoid the error you saw
+RUN pnpm install --prod --frozen-lockfile
+
+# Expose the port the app runs on
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
-
-# Start application
+# Start the application
 CMD ["node", "dist/index.js"]
